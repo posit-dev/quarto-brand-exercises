@@ -1,0 +1,257 @@
+
+---
+title: "World Happiness Report"
+subtitle: "Happiness Trends and Contributing Factors (2011-2024)"
+format: 
+  html:
+    code-fold: false
+    code-summary: "Show code"
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(tidyverse)
+library(patchwork)
+
+
+whr <- read_csv(here::here("data/whr.csv"))
+```
+
+## Introduction
+
+This report analyzes the data from the [2025 World Happiness Report](https://www.worldhappiness.report/), which looks at global happiness trends and factors that contribute to national happiness levels from 2011 to 2024. The dataset contains happiness rankings and scores for 169 countries.
+
+## Global Happiness Trends
+
+### Overall Trends (2011-2024)
+
+```{r global-trends}
+# Calculate global happiness statistics by year
+global_trends <- 
+  whr |>
+  group_by(year) |>
+  summarise(
+    mean_happiness = mean(ladder_score, na.rm = TRUE),
+    median_happiness = median(ladder_score, na.rm = TRUE),
+    min_happiness = min(ladder_score, na.rm = TRUE),
+    max_happiness = max(ladder_score, na.rm = TRUE),
+    countries_count = n(),
+    .groups = 'drop'
+  )
+
+global_trends |> 
+  ggplot(aes(x = year, y = mean_happiness)) +
+  geom_line(color = "steelblue", linewidth = 1.5) +
+  geom_point(color = "steelblue", size = 3) +
+  labs(
+    title = "Global Average Happiness Over Time",
+    subtitle = "World Happiness Report Data (2011-2024)",
+    x = "Year",
+    y = "Average Happiness Score"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  ) +
+  scale_x_continuous(breaks = seq(2011, 2024, 1)) +
+  scale_y_continuous(limits = c(5.2, 5.7), breaks = seq(5.2, 5.7, 0.1))
+```
+
+#### Key findings
+
+- **Gradual Improvement**: Average global happiness has increased from ~5.39 (2011) to ~5.58 (2024)
+- **2011-2016**: Relatively stable around 5.35-5.40
+- **2017-2019**: Beginning of upward trend
+- **2019-2024**: Higher plateau around 5.50-5.58
+
+## Country-Level Analysis
+
+### Countries with Largest Changes in Happiness
+
+```{r country-changes}
+most_changed_countries <- 
+  whr |>
+  drop_na(year, ladder_score) |> 
+  group_by(country_name) |>
+  summarise(
+    first_year = min(year),
+    last_year = max(year),
+    first_score = first(ladder_score, order_by = year),
+    last_score = last(ladder_score, order_by = year),
+    change = last_score - first_score,
+    years_span = last_year - first_year,
+    .groups = 'drop'
+  ) |>
+  filter(years_span >= 10) |> 
+  group_by(improvement = change > 0) |> 
+  slice_max(order_by = abs(change), n = 5) |> 
+  ungroup() 
+
+improvements_plot <- 
+  whr |>
+  inner_join(
+    most_changed_countries |> filter(improvement == TRUE), 
+    by = join_by(country_name)
+    ) |> 
+  ggplot(aes(x = year, y = ladder_score, color = country_name)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  scale_x_continuous(breaks = scales::breaks_width(3)) +
+  labs(
+    title = "Greatest improvements",
+    x = "Year",
+    y = "Happiness Score",
+    color = NULL
+  ) 
+
+declines_plot <- 
+  whr |>
+  inner_join(
+    most_changed_countries |> filter(improvement == FALSE), 
+    by = join_by(country_name)
+  ) |> 
+  ggplot(aes(x = year, y = ladder_score, color = country_name)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  scale_x_continuous(breaks = scales::breaks_width(3)) +
+  scale_color_manual(
+    values = 
+        c("#d62728", "#ff7f0e", "#8c564b", "#e377c2", "#7f7f7f")
+  ) +
+  labs(
+    title = "Greatest Declines",
+    x = "Year", 
+    y = "Happiness Score",
+    color = NULL
+  ) 
+
+
+improvements_plot + 
+    declines_plot & 
+    theme_minimal() &
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      axis.text = element_text(size = 11)
+    ) 
+```
+
+#### Key findings
+
+- Post-Soviet and eastern European countries showed improvement trends, with Serbia, Bulgaria, and Georgia having the largest improvements in happiness.
+- Afghanistan, Lebanon, and Jordan had the most severe declines in happiness, coinciding with major political and economic events. 
+
+## Happiness Contributing Factors
+
+### Contributing factors 2024
+
+For the years with complete factor data, we can analyze what drives happiness differences between countries.
+
+```{r factor-analysis}
+factor_contributions <- 
+  whr |> 
+  filter(year == 2024) |> 
+  summarise(
+    GDP = mean(explained_by_log_gdp_per_capita, na.rm = TRUE),
+    `Social Support` = mean(explained_by_social_support, na.rm = TRUE),
+    `Life Expectancy` = mean(explained_by_healthy_life_expectancy, na.rm = TRUE),
+    `Freedom` = mean(explained_by_freedom_to_make_life_choices, na.rm = TRUE),
+    `Generosity` = mean(explained_by_generosity, na.rm = TRUE),
+    `Low Corruption` = mean(explained_by_perceptions_of_corruption, na.rm = TRUE)
+  ) |>
+  pivot_longer(
+    everything(), 
+    names_to = "Factor", 
+    values_to = "Average_Contribution"
+  ) |>
+  arrange(desc(Average_Contribution))
+
+factor_contributions |> 
+ggplot(aes(x = reorder(Factor, Average_Contribution), y = Average_Contribution)) +
+  geom_col(fill = "steelblue", alpha = 0.8) +
+  coord_flip() +
+  labs(
+    title = "Average Contribution of Factors to Happiness",
+    subtitle = "Based on World Happiness Report data (2019-2024)",
+    x = "Factor",
+    y = "Average Contribution to Happiness Score"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.text = element_text(size = 11)
+  ) 
+```
+
+The top contributors to happiness worldwide in 2024 were social support, GDP per capita, and having a sense of freedom. 
+
+### Happiness Factor Breakdown for Top 10 Countries (2024)
+
+```{r top-countries}
+# Get the top 10 happiest countries from 2024 and their factor breakdowns
+top_countries_2024 <- 
+  whr |>
+  filter(year == 2024) |>
+  slice_max(order_by = ladder_score, n = 10)
+
+stacked_data <- 
+  top_countries_2024 |>
+  select(-ladder_score, -rank, -year, -upperwhisker, -lowerwhisker) |>
+  pivot_longer(cols = -country_name, names_to = "Factor", values_to = "Contribution") |>
+  mutate(
+    Factor = case_when(
+      Factor == "explained_by_log_gdp_per_capita" ~ "GDP per Capita",
+      Factor == "explained_by_social_support" ~ "Social Support", 
+      Factor == "explained_by_healthy_life_expectancy" ~ "Life Expectancy",
+      Factor == "explained_by_freedom_to_make_life_choices" ~ "Freedom",
+      Factor == "explained_by_generosity" ~ "Generosity",
+      Factor == "explained_by_perceptions_of_corruption" ~ "Low Corruption",
+      Factor == "dystopia_residual" ~ "Dystopia + residual",
+      TRUE ~ Factor
+    ) |> 
+      fct_reorder(Contribution),
+    country_name = 
+        fct_reorder(country_name, Contribution, .fun = sum, .desc = TRUE)
+  )
+
+stacked_data |> 
+  ggplot(aes(x = country_name, y = Contribution, fill = Factor)) +
+  geom_col() +
+  labs(
+    title = "Happiness Factor Breakdown for Top 10 Happiest Countries",
+    subtitle = "2024 World Happiness Report Data",
+    x = "Country",
+    y = "Contribution to Happiness Score",
+    fill = "Contributing Factor"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(type = "qual", palette = "Set2")
+```
+
+
+#### Patterns Among Top Countries
+
+- **Nordic countries tend to be happy**: Finland (`{r} round(top_countries_2024$ladder_score[1], 2)`), Denmark (`{r} round(top_countries_2024$ladder_score[2], 2)`), Iceland (`{r} round(top_countries_2024$ladder_score[3], 2)`), Sweden (`{r} round(top_countries_2024$ladder_score[4], 2)`), and Norway (`{r} round(top_countries_2024$ladder_score[7], 2)`) show similar balanced patterns.
+- **Effect of GDP varies**: Luxembourg has the highest GDP contribution, while Costa Rica has high happiness with lower GDP contribution, but strong social factors.
+- **Balanced Approach**: No single happiness factor dominates. 
+
+## Conclusions
+
+1. **Global happiness is gradually improving**: The world has become slightly happier over the past decade.
+
+2. **Social connections and economic conditions are most important**: GDP per capita and social support are the strongest contributors to national happiness. 
+
+3. **Multiple pathways to happiness**: The top countries show that there are different combinations of factors that can lead to high happiness levels.
+
+5. **Crises can severely affect happiness**: Countries experiencing political upheaval or economic crisis show dramatic happiness declines.
+
